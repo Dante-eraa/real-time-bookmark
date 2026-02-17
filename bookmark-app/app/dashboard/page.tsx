@@ -23,70 +23,42 @@ export default function Dashboard() {
   const [touched, setTouched] = useState({ title: false, url: false });
 
   useEffect(() => {
-    let channel: any;
+    checkUser();
+    fetchBookmarks();
 
-    const init = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!session) {
-        router.push("/");
-        return;
-      }
-
-      const uid = session.user.id;
-
-      // Initial fetch
-      const { data } = await supabase
-        .from("bookmarks")
-        .select("*")
-        .eq("user_id", uid)
-        .order("created_at", { ascending: false });
-
-      setBookmarks(data || []);
-
-      // Realtime (filtered by user)
-      channel = supabase
-        .channel("realtime-bookmarks")
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "bookmarks",
-            filter: `user_id=eq.${uid}`,
-          },
-          (payload) => {
-            if (payload.eventType === "INSERT") {
-              setBookmarks((prev) => {
-                if (prev.some((b) => b.id === payload.new.id)) return prev;
-                return [payload.new, ...prev];
-              });
-            }
-
-            if (payload.eventType === "DELETE") {
-              setBookmarks((prev) =>
-                prev.filter((b) => b.id !== payload.old.id),
-              );
-            }
-
-            if (payload.eventType === "UPDATE") {
-              setBookmarks((prev) =>
-                prev.map((b) => (b.id === payload.new.id ? payload.new : b)),
-              );
-            }
-          },
-        )
-        .subscribe();
-    };
-
-    init();
+    const channel = supabase
+      .channel("realtime-bookmarks")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "bookmarks",
+        },
+        () => {
+          fetchBookmarks();
+        },
+      )
+      .subscribe();
 
     return () => {
-      if (channel) supabase.removeChannel(channel);
+      supabase.removeChannel(channel);
     };
   }, []);
+
+  const checkUser = async () => {
+    const { data } = await supabase.auth.getUser();
+    if (!data.user) router.push("/");
+  };
+
+  const fetchBookmarks = async () => {
+    const { data } = await supabase
+      .from("bookmarks")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    setBookmarks(data || []);
+  };
 
   const validateForm = () => {
     const newErrors = { title: "", url: "" };
@@ -148,10 +120,12 @@ export default function Dashboard() {
     setUrl("");
     setErrors({ title: "", url: "" });
     setTouched({ title: false, url: false });
+    fetchBookmarks();
   };
 
   const deleteBookmark = async (id: string) => {
     await supabase.from("bookmarks").delete().eq("id", id);
+    fetchBookmarks();
   };
 
   const logout = async () => {
